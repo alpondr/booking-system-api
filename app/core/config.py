@@ -10,7 +10,14 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        # .env also has POSTGRES_* vars for docker-compose, which this
+        # class doesn't need. Without this, pydantic-settings errors out
+        # on every env var it doesn't recognize as a field.
+        extra="ignore",
+    )
 
 
 # Single settings instance, imported wherever config is needed
