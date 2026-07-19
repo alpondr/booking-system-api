@@ -27,6 +27,10 @@ class AppointmentOverlapError(Exception):
     """The requested range overlaps an existing active appointment."""
 
 
+class AppointmentNotActiveError(Exception):
+    """Cancel/reschedule was attempted on a non-active appointment."""
+
+
 def calculate_end_time(start_time: datetime, service: Service) -> datetime:
     return start_time + timedelta(minutes=service.duration_minutes)
 
@@ -47,7 +51,12 @@ def is_within_working_hours(start_time: datetime, end_time: datetime) -> bool:
     )
 
 
-def has_overlap(db: Session, start_time: datetime, end_time: datetime) -> bool:
+def has_overlap(
+    db: Session,
+    start_time: datetime,
+    end_time: datetime,
+    exclude_appointment_id: int | None = None,
+) -> bool:
     """
     Two half-open ranges [start1, end1) and [start2, end2) overlap exactly
     when:
@@ -69,20 +78,28 @@ def has_overlap(db: Session, start_time: datetime, end_time: datetime) -> bool:
     what the query below checks against every ACTIVE appointment already
     in the DB. Only ACTIVE ones count - a cancelled appointment must not
     block a new booking for that same slot.
+
+    exclude_appointment_id is used by reschedule: the appointment being
+    moved currently occupies its own old slot, so it must not be counted
+    as a conflict against itself.
     """
-    existing = (
-        db.query(Appointment)
-        .filter(
-            Appointment.status == AppointmentStatus.ACTIVE,
-            Appointment.start_time < end_time,
-            Appointment.end_time > start_time,
-        )
-        .first()
+    query = db.query(Appointment).filter(
+        Appointment.status == AppointmentStatus.ACTIVE,
+        Appointment.start_time < end_time,
+        Appointment.end_time > start_time,
     )
-    return existing is not None
+    if exclude_appointment_id is not None:
+        query = query.filter(Appointment.id != exclude_appointment_id)
+
+    return query.first() is not None
 
 
-def validate_appointment_time(db: Session, start_time: datetime, end_time: datetime) -> None:
+def validate_appointment_time(
+    db: Session,
+    start_time: datetime,
+    end_time: datetime,
+    exclude_appointment_id: int | None = None,
+) -> None:
     if is_in_the_past(start_time):
         raise AppointmentInPastError("Cannot book an appointment in the past")
 
@@ -93,7 +110,7 @@ def validate_appointment_time(db: Session, start_time: datetime, end_time: datet
             f"{BUSINESS_TIMEZONE.key})"
         )
 
-    if has_overlap(db, start_time, end_time):
+    if has_overlap(db, start_time, end_time, exclude_appointment_id=exclude_appointment_id):
         raise AppointmentOverlapError("This time slot overlaps with an existing appointment")
 
 
@@ -111,6 +128,41 @@ def create_appointment(
         status=AppointmentStatus.ACTIVE,
     )
     db.add(appointment)
+    db.commit()
+    db.refresh(appointment)
+    return appointment
+
+
+def cancel_appointment(db: Session, appointment: Appointment) -> Appointment:
+    # Soft delete: flip the status, never remove the row. Keeps the
+    # appointment's history around (for the admin views in the next step)
+    # instead of destroying data that already happened.
+    if appointment.status != AppointmentStatus.ACTIVE:
+        raise AppointmentNotActiveError("Only active appointments can be cancelled")
+
+    appointment.status = AppointmentStatus.CANCELLED
+    db.commit()
+    db.refresh(appointment)
+    return appointment
+
+
+def reschedule_appointment(
+    db: Session, appointment: Appointment, new_start_time: datetime
+) -> Appointment:
+    if appointment.status != AppointmentStatus.ACTIVE:
+        raise AppointmentNotActiveError("Only active appointments can be rescheduled")
+
+    # Keep the originally booked duration, even if the service's default
+    # duration has since changed - the customer agreed to this length.
+    duration = appointment.end_time - appointment.start_time
+    new_end_time = new_start_time + duration
+
+    validate_appointment_time(
+        db, new_start_time, new_end_time, exclude_appointment_id=appointment.id
+    )
+
+    appointment.start_time = new_start_time
+    appointment.end_time = new_end_time
     db.commit()
     db.refresh(appointment)
     return appointment
