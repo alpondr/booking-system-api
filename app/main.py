@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 
-from app.routers import auth
+from app.routers import auth, services
 
 app = FastAPI(title="Booking System API")
 
 app.include_router(auth.router)
+app.include_router(services.router)
 
 
 # Simple health check, useful to confirm the server is up
