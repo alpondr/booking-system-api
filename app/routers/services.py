@@ -1,11 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.deps import require_admin
 from app.database.session import get_db
 from app.models.service import Service
+from app.schemas.appointment import AvailableSlot
 from app.schemas.service import ServiceCreate, ServiceOut, ServiceUpdate
+from app.services.appointment_service import BUSINESS_TIMEZONE, find_available_slots
 
 router = APIRouter(prefix="/services", tags=["services"])
 
@@ -24,6 +28,27 @@ def get_service(service_id: int, db: Session = Depends(get_db)):
     if service is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return service
+
+
+@router.get("/{service_id}/available-slots", response_model=list[AvailableSlot])
+def get_available_slots(
+    service_id: int,
+    slot_date: date = Query(..., alias="date"),
+    db: Session = Depends(get_db),
+):
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+
+    today_local = datetime.now(BUSINESS_TIMEZONE).date()
+    if slot_date < today_local:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot list available slots for a past date",
+        )
+
+    slots = find_available_slots(db, service, slot_date)
+    return [AvailableSlot(start_time=start, end_time=end) for start, end in slots]
 
 
 @router.post("", response_model=ServiceOut, status_code=status.HTTP_201_CREATED)

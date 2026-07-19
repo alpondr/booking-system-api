@@ -229,3 +229,74 @@ def list_all_appointments(
         .all()
     )
     return items, total
+
+
+def _working_hours_window_utc(day: date) -> tuple[datetime, datetime]:
+    """Working hours (09:00-18:00 local) for one calendar day, in UTC."""
+    start_local = datetime.combine(day, WORKING_HOURS_START, tzinfo=BUSINESS_TIMEZONE)
+    end_local = datetime.combine(day, WORKING_HOURS_END, tzinfo=BUSINESS_TIMEZONE)
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def find_available_slots(
+    db: Session, service: Service, day: date
+) -> list[tuple[datetime, datetime]]:
+    """
+    Free-time-between-busy-intervals scan:
+
+    1. Start with one big "free" window: working hours for that day.
+    2. Fetch every ACTIVE appointment that overlaps that window, sorted by
+       start_time - these are the "busy" intervals.
+    3. Walk through them left to right with a moving `cursor`. Any gap
+       between the cursor and the next busy interval's start is free time;
+       chop that gap into back-to-back slots the length of this service's
+       duration. Then jump the cursor past the busy interval
+       (cursor = max(cursor, busy.end) - the max() matters if a later
+       appointment is fully contained inside an earlier one).
+    4. Whatever's left after the last busy interval, up to closing time,
+       is free too.
+
+    This is the same "merge/scan intervals" pattern behind classic
+    "meeting rooms" / "find free time" interview questions.
+    """
+    window_start, window_end = _working_hours_window_utc(day)
+
+    now = datetime.now(timezone.utc)
+    if window_start < now:
+        window_start = now  # don't offer slots that are already in the past
+
+    duration = timedelta(minutes=service.duration_minutes)
+
+    busy_appointments = (
+        db.query(Appointment)
+        .filter(
+            Appointment.status == AppointmentStatus.ACTIVE,
+            Appointment.start_time < window_end,
+            Appointment.end_time > window_start,
+        )
+        .order_by(Appointment.start_time)
+        .all()
+    )
+
+    def slots_in_gap(gap_start: datetime, gap_end: datetime) -> list[tuple[datetime, datetime]]:
+        slots = []
+        slot_start = gap_start
+        while slot_start + duration <= gap_end:
+            slots.append((slot_start, slot_start + duration))
+            slot_start += duration
+        return slots
+
+    free_slots: list[tuple[datetime, datetime]] = []
+    cursor = window_start
+
+    for appointment in busy_appointments:
+        if cursor < appointment.start_time:
+            free_slots += slots_in_gap(cursor, min(appointment.start_time, window_end))
+        cursor = max(cursor, appointment.end_time)
+        if cursor >= window_end:
+            break
+
+    if cursor < window_end:
+        free_slots += slots_in_gap(cursor, window_end)
+
+    return free_slots

@@ -38,3 +38,8 @@ class AppointmentOut(BaseModel):
     status: AppointmentStatus
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AvailableSlot(BaseModel):
+    start_time: datetime
+    end_time: datetime
