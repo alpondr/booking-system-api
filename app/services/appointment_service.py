@@ -1,4 +1,5 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -166,3 +167,65 @@ def reschedule_appointment(
     db.commit()
     db.refresh(appointment)
     return appointment
+
+
+def _local_day_bounds_utc(day: date) -> tuple[datetime, datetime]:
+    """Turns a calendar day (business's local timezone) into a
+    [start, end) UTC datetime range, for filtering start_time by date."""
+    start_local = datetime.combine(day, time.min, tzinfo=BUSINESS_TIMEZONE)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def list_user_appointments(
+    db: Session,
+    user_id: int,
+    time_filter: Literal["past", "upcoming"] | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[Appointment], int]:
+    query = db.query(Appointment).filter(Appointment.user_id == user_id)
+
+    now = datetime.now(timezone.utc)
+    if time_filter == "past":
+        query = query.filter(Appointment.start_time < now)
+    elif time_filter == "upcoming":
+        query = query.filter(Appointment.start_time >= now)
+
+    total = query.count()
+    items = (
+        query.order_by(Appointment.start_time)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total
+
+
+def list_all_appointments(
+    db: Session,
+    status_filter: AppointmentStatus | None,
+    date_from: date | None,
+    date_to: date | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[Appointment], int]:
+    query = db.query(Appointment)
+
+    if status_filter is not None:
+        query = query.filter(Appointment.status == status_filter)
+    if date_from is not None:
+        start_utc, _ = _local_day_bounds_utc(date_from)
+        query = query.filter(Appointment.start_time >= start_utc)
+    if date_to is not None:
+        _, end_utc = _local_day_bounds_utc(date_to)
+        query = query.filter(Appointment.start_time < end_utc)
+
+    total = query.count()
+    items = (
+        query.order_by(Appointment.start_time)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total

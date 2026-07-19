@@ -1,12 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_admin
 from app.database.session import get_db
-from app.models.appointment import Appointment
+from app.models.appointment import Appointment, AppointmentStatus
 from app.models.service import Service
 from app.models.user import User
 from app.schemas.appointment import AppointmentCreate, AppointmentOut, AppointmentReschedule
+from app.schemas.common import Page
 from app.services.appointment_service import (
     AppointmentInPastError,
     AppointmentNotActiveError,
@@ -14,6 +18,8 @@ from app.services.appointment_service import (
     OutsideWorkingHoursError,
     cancel_appointment,
     create_appointment,
+    list_all_appointments,
+    list_user_appointments,
     reschedule_appointment,
 )
 
@@ -59,6 +65,35 @@ def book_appointment(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
     return appointment
+
+
+# IMPORTANT: this must be defined before any "/{appointment_id}" style
+# route below it - otherwise FastAPI would try to parse "me" as an id.
+@router.get("/me", response_model=Page[AppointmentOut])
+def list_my_appointments(
+    time_filter: Literal["past", "upcoming"] | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    items, total = list_user_appointments(db, current_user.id, time_filter, page, page_size)
+    return Page(items=items, total=total, page=page, page_size=page_size)
+
+
+# Admin-only: every appointment, from every user, filterable by status/date.
+@router.get("", response_model=Page[AppointmentOut])
+def list_appointments_admin(
+    status_filter: AppointmentStatus | None = Query(None, alias="status"),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    items, total = list_all_appointments(db, status_filter, date_from, date_to, page, page_size)
+    return Page(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.post("/{appointment_id}/cancel", response_model=AppointmentOut)
