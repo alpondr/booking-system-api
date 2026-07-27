@@ -30,3 +30,13 @@ def past_at(hour: int = 10, minute: int = 0, days_back: int = 1) -> datetime:
 def iso(dt: datetime) -> str:
     """Format for JSON request bodies."""
     return dt.isoformat()
+
+
+def parse(value: str) -> datetime:
+    """Read a datetime out of a JSON response.
+
+    Compare parsed datetimes, never raw strings: the API sends back what
+    Postgres returns (UTC), so the same instant is written with a
+    different offset than the one we sent.
+    """
+    return datetime.fromisoformat(value)

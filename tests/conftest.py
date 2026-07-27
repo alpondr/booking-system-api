@@ -12,7 +12,9 @@ from app.main import app
 # Importing the models package registers every table on Base.metadata,
 # which is what create_all() below builds the schema from.
 from app.models import Service, User  # noqa: F401
+from app.models.appointment import Appointment, AppointmentStatus
 from app.models.user import UserRole
+from app.services.appointment_service import calculate_end_time
 
 TEST_PASSWORD = "testpassword123"
 
@@ -154,3 +156,35 @@ def service_factory(db_session):
 def service(service_factory) -> Service:
     """Default 30-minute service."""
     return service_factory()
+
+
+@pytest.fixture
+def appointment_factory(db_session, user, service):
+    """Writes an appointment straight to the DB.
+
+    Overlap tests need appointments to already exist, including ones the
+    API would refuse to create (cancelled, in the past). Going through
+    POST /appointments for setup would make those cases impossible.
+    """
+
+    def _factory(
+        start_time,
+        end_time=None,
+        status: AppointmentStatus = AppointmentStatus.ACTIVE,
+        owner: User | None = None,
+        booked_service: Service | None = None,
+    ) -> Appointment:
+        booked_service = booked_service or service
+        appointment = Appointment(
+            user_id=(owner or user).id,
+            service_id=booked_service.id,
+            start_time=start_time,
+            end_time=end_time or calculate_end_time(start_time, booked_service),
+            status=status,
+        )
+        db_session.add(appointment)
+        db_session.commit()
+        db_session.refresh(appointment)
+        return appointment
+
+    return _factory
