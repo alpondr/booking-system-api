@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     # Field names are matched to env var names case-insensitively,
     # e.g. database_url <-> DATABASE_URL
     database_url: str
+    # Only used by the test suite. Optional so the app still boots without it.
+    test_database_url: str | None = None
     secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30

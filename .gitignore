@@ -19,9 +19,11 @@ env/
 .mypy_cache/
 .ruff_cache/
 
-# IDE
+# IDE / local tooling
 .vscode/
 .idea/
+CLAUDE.md
+.claude/
 
 # OS
 .DS_Store

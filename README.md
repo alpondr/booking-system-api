@@ -36,8 +36,8 @@ the routers. Routers just handle HTTP stuff and call into that layer.
 1. Clone the repo and create a virtualenv:
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
