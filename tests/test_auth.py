@@ -122,6 +122,18 @@ def test_me_rejects_a_token_signed_with_another_key(client, user):
     assert response.status_code == 401
 
 
+def test_me_rejects_a_token_without_a_subject(client):
+    """Correctly signed by us, but carries no 'sub' claim - so there is
+    no user to resolve it to."""
+    tokenless_subject = jwt.encode(
+        {"exp": datetime.now(timezone.utc) + timedelta(minutes=30)},
+        settings.secret_key,
+        algorithm=settings.algorithm,
+    )
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {tokenless_subject}"})
+    assert response.status_code == 401
+
+
 def test_me_rejects_an_expired_token(client, user, monkeypatch):
     # create_access_token reads the expiry from settings at call time, so
     # a negative value produces an already-expired token.
