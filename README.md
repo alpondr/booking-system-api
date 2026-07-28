@@ -1,19 +1,28 @@
 # Booking System API
 
+[![CI](https://github.com/alpondr/booking-system-api/actions/workflows/ci.yml/badge.svg)](https://github.com/alpondr/booking-system-api/actions/workflows/ci.yml)
+
 A simple appointment booking API built with FastAPI + PostgreSQL, made as a
 learning project. Users can register, browse services, and book
 appointments. There's overlap checking so two appointments can't be booked
 for the same time slot.
 
+Live: https://booking-system-api-0stg.onrender.com/docs
+
+Free tier, so the first request after an idle period is slow while Render
+and Neon wake up.
+
 ## Tech stack
 
-- Python 3.11+
+- Python 3.13 (pinned in `.python-version`)
 - FastAPI
 - PostgreSQL + SQLAlchemy
 - Alembic (migrations)
 - Pydantic (validation)
 - JWT auth (python-jose + passlib)
 - Docker Compose (for the database)
+- pytest (tests) + GitHub Actions (CI)
+- Deployed on Render, database on Neon
 
 ## Project structure
 
@@ -26,6 +35,7 @@ app/
   services/    business logic (overlap checking, slot calculation, etc.)
   routers/     FastAPI endpoints
 alembic/       DB migrations
+tests/         pytest suite, fixtures in conftest.py
 ```
 
 Business logic (like the overlap check) lives in `app/services/`, not in
@@ -70,6 +80,37 @@ uvicorn app.main:app --reload
 
 Docs available at `http://localhost:8000/docs`.
 
+## Running tests
+
+Tests use a separate database - they drop and recreate every table. Create
+it once and set `TEST_DATABASE_URL` in `.env` (see `.env.example`):
+
+```bash
+docker compose exec db createdb -U booking_user booking_test
+pip install -r requirements-dev.txt
+pytest
+```
+
+Coverage report: `pytest --cov=app --cov-report=term-missing`.
+
+The same suite runs on GitHub Actions for every push and pull request.
+
+## Deployment
+
+Render web service + Neon Postgres.
+
+- Build: `pip install -r requirements.txt`
+- Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Env vars on Render: `DATABASE_URL` (Neon's pooled string), `SECRET_KEY`,
+  `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`
+
+Migrations are run locally before deploying, against Neon's direct
+(non-pooled) string:
+
+```bash
+DATABASE_URL="<neon-direct-url>" alembic upgrade head
+```
+
 ## Notes on some design decisions
 
 - **Timestamps are stored in UTC** (`TIMESTAMPTZ` columns), and the API only
@@ -80,6 +121,12 @@ Docs available at `http://localhost:8000/docs`.
   `status` changes to `cancelled`. Nothing gets deleted from the DB.
 - **Overlap checking** only looks at `ACTIVE` appointments, so a cancelled
   slot frees up immediately.
+- **Tests run on Postgres, not SQLite.** SQLite has no timezone type and
+  returns naive datetimes for the `TIMESTAMPTZ` columns the overlap logic
+  depends on, so it would test different behaviour than production.
+- **Each test is rolled back**, using a session bound with
+  `join_transaction_mode="create_savepoint"` so the app's own `db.commit()`
+  calls can be undone too.
 - There's no per-resource/per-staff booking here - it's modeled as a
   single-provider business (one appointment at a time, regardless of
   which service). Adjust `has_overlap` in
