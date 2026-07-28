@@ -8,7 +8,7 @@ class UserBase(BaseModel):
 
 
 # What the client sends to register. Plain password here, it gets
-# hashed before it's ever stored (see core/security.py in step 6).
+# hashed before it's ever stored (see core/security.py).
 class UserCreate(UserBase):
     password: str
 

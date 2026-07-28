@@ -136,8 +136,8 @@ def create_appointment(
 
 def cancel_appointment(db: Session, appointment: Appointment) -> Appointment:
     # Soft delete: flip the status, never remove the row. Keeps the
-    # appointment's history around (for the admin views in the next step)
-    # instead of destroying data that already happened.
+    # appointment's history around (the admin listing needs it) instead
+    # of destroying data that already happened.
     if appointment.status != AppointmentStatus.ACTIVE:
         raise AppointmentNotActiveError("Only active appointments can be cancelled")
 
